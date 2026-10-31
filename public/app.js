@@ -11,7 +11,8 @@ const RTC_CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' }
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' }
   ]
 };
 
@@ -25,6 +26,7 @@ const state = {
   selectedQuality: '1080p60',
   viewMode: 'spotlight', // 'spotlight' ou 'grid'
   selectedSpotlightId: null, // socketId da tela em destaque
+  incomingGuest: null, // convidado solicitando entrada
 
   // Stream local de tela
   localScreenStream: null,
@@ -118,12 +120,27 @@ function initSocket() {
   // Fila de Espera (Lobby)
   state.socket.on('guest-waiting', (guest) => {
     state.waitingQueue.set(guest.socketId, guest);
+    state.incomingGuest = guest;
     updateLobbyUI();
+
+    // Exibe banner flutuante diretamente no topo da tela do anfitrião
+    const alertBanner = document.getElementById('lobby-incoming-alert');
+    const guestNameEl = document.getElementById('incoming-guest-name');
+    if (alertBanner && guestNameEl) {
+      guestNameEl.innerHTML = `<strong>${escapeHTML(guest.username)}</strong> pediu para assistir sua transmissão`;
+      alertBanner.classList.remove('hidden');
+    }
+
     showToast(`${guest.username} pediu permissão para entrar!`, 'normal');
   });
 
   state.socket.on('guest-left-lobby', ({ socketId }) => {
     state.waitingQueue.delete(socketId);
+    if (state.incomingGuest && state.incomingGuest.socketId === socketId) {
+      state.incomingGuest = null;
+      const alertBanner = document.getElementById('lobby-incoming-alert');
+      if (alertBanner) alertBanner.classList.add('hidden');
+    }
     updateLobbyUI();
   });
 
@@ -141,6 +158,11 @@ function initSocket() {
   state.socket.on('kicked', (msg) => {
     leaveRoom();
     alert(`[Aviso]: ${msg}`);
+  });
+
+  // Atualizações em tempo real da lista de salas ao vivo
+  state.socket.on('rooms-updated', (rooms) => {
+    renderActiveRooms(rooms);
   });
 
   // Sinalização WebRTC
@@ -170,7 +192,75 @@ function setupAuthTabs() {
     tabCreate.classList.remove('active');
     formJoin.classList.remove('hidden');
     formCreate.classList.add('hidden');
+    fetchActiveRooms();
   });
+}
+
+function fetchActiveRooms() {
+  if (!state.socket) return;
+  state.socket.emit('get-active-rooms', (res) => {
+    if (res && res.success) {
+      renderActiveRooms(res.rooms);
+    }
+  });
+}
+
+function renderActiveRooms(rooms) {
+  const container = document.getElementById('active-rooms-list');
+  if (!container) return;
+
+  container.innerHTML = '';
+  if (!rooms || rooms.length === 0) {
+    container.innerHTML = `
+      <p class="no-rooms-msg">
+        Nenhuma sala ao vivo no momento.<br>
+        <small>Assim que alguém transmitir ela aparece aqui!</small>
+      </p>
+    `;
+    return;
+  }
+
+  rooms.forEach((r) => {
+    const card = document.createElement('div');
+    card.className = 'active-room-card';
+    card.innerHTML = `
+      <div class="active-room-info">
+        <div class="active-room-name">
+          <span class="live-dot-pulse"></span>
+          <span>${escapeHTML(r.roomName)}</span>
+          ${r.hasPassword ? '<span title="Requer Senha">🔒</span>' : ''}
+        </div>
+        <div class="active-room-meta">
+          Por <strong>${escapeHTML(r.hostName)}</strong> • 👥 ${r.membersCount} na sala
+        </div>
+      </div>
+      <button class="btn btn-blurple btn-small btn-join-direct">Entrar</button>
+    `;
+
+    card.querySelector('.btn-join-direct').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('join-room-id').value = r.roomId;
+      const username = document.getElementById('join-username').value.trim();
+      if (!username) {
+        document.getElementById('join-username').focus();
+        showToast('Digite seu nome/apelido primeiro!', 'normal');
+        return;
+      }
+      document.getElementById('form-join-room').requestSubmit();
+    });
+
+    container.appendChild(card);
+  });
+}
+
+function extractRoomId(input) {
+  if (!input) return '';
+  const str = String(input).trim();
+  const paramMatch = str.match(/[?&]room=([a-zA-Z0-9_-]+)/i);
+  if (paramMatch) return paramMatch[1].trim();
+  const pathMatch = str.match(/\/([a-zA-Z0-9_-]{6,32})(?:\/|\?|$)/);
+  if (pathMatch) return pathMatch[1].trim();
+  return str.replace(/[^a-zA-Z0-9_-]/g, '');
 }
 
 function setupURLQuery() {
@@ -178,7 +268,7 @@ function setupURLQuery() {
   const roomParam = params.get('room');
   if (roomParam) {
     document.getElementById('tab-join').click();
-    document.getElementById('join-room-id').value = roomParam;
+    document.getElementById('join-room-id').value = extractRoomId(roomParam);
   }
 }
 
@@ -202,8 +292,13 @@ function setupEventListeners() {
   document.getElementById('form-join-room').addEventListener('submit', (e) => {
     e.preventDefault();
     const username = document.getElementById('join-username').value.trim();
-    const roomId = document.getElementById('join-room-id').value.trim();
+    const rawInput = document.getElementById('join-room-id').value;
+    const roomId = extractRoomId(rawInput);
     const password = document.getElementById('join-password').value;
+
+    if (!roomId) {
+      return showToast('Por favor, informe o link ou código da sala.', 'error');
+    }
 
     state.username = username;
     state.socket.emit('join-room', { username, roomId, password }, (res) => {
@@ -225,7 +320,7 @@ function setupEventListeners() {
   document.getElementById('btn-copy-invite').addEventListener('click', copyInviteLink);
   document.getElementById('btn-leave-room').addEventListener('click', leaveRoom);
 
-  // Botão Transmitir Tela (Liberado para todos na sala!)
+  // Botão Transmitir Tela
   document.getElementById('btn-toggle-screen').addEventListener('click', () => {
     if (state.isStreaming) {
       stopScreenSharing();
@@ -249,8 +344,68 @@ function setupEventListeners() {
     renderStreamsStage();
   });
 
-  // Modal de Segurança
+  // Modal de Segurança (Lobby Host)
   document.getElementById('btn-host-security').addEventListener('click', openSecurityModal);
+
+  // Fechar modais pelos botões [X]
+  const btnCloseScreen = document.getElementById('btn-close-screen-modal');
+  if (btnCloseScreen) {
+    btnCloseScreen.addEventListener('click', () => {
+      document.getElementById('screen-picker-modal').classList.add('hidden');
+    });
+  }
+
+  const btnCloseSecurity = document.getElementById('btn-close-security-modal');
+  if (btnCloseSecurity) {
+    btnCloseSecurity.addEventListener('click', () => {
+      document.getElementById('security-modal').classList.add('hidden');
+    });
+  }
+
+  // Fechar qualquer modal ao clicar no fundo escuro (backdrop)
+  document.querySelectorAll('.modal-overlay').forEach((overlay) => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        overlay.classList.add('hidden');
+      }
+    });
+  });
+
+  // Fechar qualquer modal ao pressionar a tecla ESC
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.modal-overlay').forEach((m) => m.classList.add('hidden'));
+    }
+  });
+
+  // Banner flutuante de aprovação rápida (Anfitrião)
+  const btnAlertApprove = document.getElementById('btn-alert-approve');
+  if (btnAlertApprove) {
+    btnAlertApprove.addEventListener('click', () => {
+      if (state.incomingGuest) {
+        state.socket.emit('approve-guest', { guestSocketId: state.incomingGuest.socketId });
+        state.waitingQueue.delete(state.incomingGuest.socketId);
+        state.incomingGuest = null;
+        document.getElementById('lobby-incoming-alert').classList.add('hidden');
+        updateLobbyUI();
+        showToast('Amigo aprovado na transmissão!', 'success');
+      }
+    });
+  }
+
+  const btnAlertReject = document.getElementById('btn-alert-reject');
+  if (btnAlertReject) {
+    btnAlertReject.addEventListener('click', () => {
+      if (state.incomingGuest) {
+        state.socket.emit('reject-guest', { guestSocketId: state.incomingGuest.socketId });
+        state.waitingQueue.delete(state.incomingGuest.socketId);
+        state.incomingGuest = null;
+        document.getElementById('lobby-incoming-alert').classList.add('hidden');
+        updateLobbyUI();
+        showToast('Entrada recusada.', 'normal');
+      }
+    });
+  }
 }
 
 // ==========================================

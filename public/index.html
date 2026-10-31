@@ -46,11 +46,11 @@
         </div>
         <div class="form-group toggle-group">
           <label class="toggle-label">
-            <input type="checkbox" id="create-waiting-room" checked>
+            <input type="checkbox" id="create-waiting-room">
             <span class="toggle-custom"></span>
             <div class="toggle-text">
               <strong>Sala de Espera (Aprovar Amigos)</strong>
-              <small>Somente quem você aprovar poderá assistir ou transmitir.</small>
+              <small>Deixe desmarcado para seus amigos entrarem direto sem fila!</small>
             </div>
           </label>
         </div>
@@ -63,13 +63,25 @@
           <label>Seu Nome / Apelido</label>
           <input type="text" id="join-username" placeholder="Ex: Lucas" required maxlength="25">
         </div>
-        <div class="form-group">
-          <label>Código da Sala ou Link</label>
-          <input type="text" id="join-room-id" placeholder="Ex: a8f9c1e2b3d4" required>
+
+        <!-- Lista de Salas Ativas / Transmissões no Limbo -->
+        <div class="active-rooms-container">
+          <div class="active-rooms-title">
+            <span class="live-dot-pulse"></span>
+            <span>Transmissões Ao Vivo no Limbo</span>
+          </div>
+          <div id="active-rooms-list" class="active-rooms-list">
+            <p class="no-rooms-msg">Nenhuma sala ao vivo no momento.<br><small>Assim que alguém transmitir ela aparece aqui!</small></p>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 14px;">
+          <label>Ou Cole o Link / Código da Sala</label>
+          <input type="text" id="join-room-id" placeholder="Cole o link ou código (Ex: a8f9c1e2b3d4)">
         </div>
         <div class="form-group">
           <label>Senha (Se a sala tiver)</label>
-          <input type="password" id="join-password" placeholder="Digite a senha configurada">
+          <input type="password" id="join-password" placeholder="Deixe em branco se a sala for aberta">
         </div>
         <button type="submit" class="btn btn-blurple btn-block">Conectar na Sala</button>
       </form>
@@ -96,6 +108,18 @@
   <!-- INTERFACE PRINCIPAL (MULTI-STREAM CINEMA) -->
   <!-- ========================================== -->
   <div id="app-container" class="theater-layout hidden">
+
+    <!-- BANNER FLUTUANTE DE PEDIDO DE ENTRADA NO LOBBY -->
+    <div id="lobby-incoming-alert" class="lobby-incoming-alert hidden">
+      <div class="incoming-alert-content">
+        <span class="incoming-icon">🔔</span>
+        <span id="incoming-guest-name"><strong>Alguém</strong> pediu para assistir sua transmissão</span>
+      </div>
+      <div class="incoming-alert-actions">
+        <button id="btn-alert-approve" class="btn btn-green btn-small">Permitir Entrada</button>
+        <button id="btn-alert-reject" class="btn btn-danger btn-small">Recusar</button>
+      </div>
+    </div>
 
     <!-- BARRA SUPERIOR -->
     <header class="theater-header">
@@ -181,7 +205,7 @@
     <div class="modal-card">
       <div class="modal-header">
         <h3>Qualidade da sua Transmissão</h3>
-        <button class="close-modal-btn" onclick="document.getElementById('screen-picker-modal').classList.add('hidden')">&times;</button>
+        <button class="close-modal-btn" id="btn-close-screen-modal" title="Fechar (Esc)">&times;</button>
       </div>
       <p class="modal-desc">Escolha a taxa de quadros e resolução para transmitir seu jogo ou tela:</p>
       <div class="quality-options">
@@ -223,7 +247,7 @@
     <div class="modal-card">
       <div class="modal-header">
         <h3>Lobby & Segurança da Sala</h3>
-        <button class="close-modal-btn" onclick="document.getElementById('security-modal').classList.add('hidden')">&times;</button>
+        <button class="close-modal-btn" id="btn-close-security-modal" title="Fechar (Esc)">&times;</button>
       </div>
       <div class="security-status-box">
         <div class="status-shield">🛡️</div>

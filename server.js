@@ -29,6 +29,7 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrcAttr: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         connectSrc: ["'self'", "ws:", "wss:", "http:", "https:"],
@@ -92,9 +93,6 @@ function sanitizeText(str) {
 // ==========================================
 // ROTAS DE API
 // ==========================================
-// Health check endpoint para o Render
-app.get('/healthz', (req, res) => res.status(200).send('OK'));
-
 app.get('/api/check-room/:roomId', (req, res) => {
   const { roomId } = req.params;
   const room = rooms.get(roomId);
@@ -109,6 +107,30 @@ app.get('/api/check-room/:roomId', (req, res) => {
     waitingRoom: room.waitingRoom
   });
 });
+
+// Helper para listagem pública de salas
+function getActiveRoomsSummary() {
+  const list = [];
+  rooms.forEach((r) => {
+    let hostName = 'Anfitrião';
+    const hostMember = r.members.get(r.hostSocketId);
+    if (hostMember) hostName = hostMember.username;
+
+    list.push({
+      roomId: r.id,
+      roomName: r.name,
+      hostName,
+      membersCount: r.members.size,
+      hasPassword: !!r.passwordHash,
+      waitingRoom: r.waitingRoom
+    });
+  });
+  return list;
+}
+
+function broadcastRoomsList() {
+  io.emit('rooms-updated', getActiveRoomsSummary());
+}
 
 // ==========================================
 // GERENCIAMENTO WEBSOCKET / WEBRTC (SOCKET.IO)
@@ -140,6 +162,15 @@ io.on('connection', (socket) => {
   };
 
   // ------------------------------------------
+  // LISTA DE TRANSMISSÕES / SALAS ATIVAS
+  // ------------------------------------------
+  socket.on('get-active-rooms', (callback) => {
+    if (typeof callback === 'function') {
+      callback({ success: true, rooms: getActiveRoomsSummary() });
+    }
+  });
+
+  // ------------------------------------------
   // 1. CRIAR SALA
   // ------------------------------------------
   socket.on('create-room', async (data, callback) => {
@@ -147,7 +178,7 @@ io.on('connection', (socket) => {
     try {
       const roomName = sanitizeText(data.roomName || 'Sala dos Amigos');
       const password = data.password ? String(data.password).trim() : null;
-      const waitingRoom = data.waitingRoom !== false; // Default: true (seguro)
+      const waitingRoom = data.waitingRoom === true; // Default: false (aberto direto aos amigos)
       const username = sanitizeText(data.username || 'Anfitrião');
 
       const roomId = generateSecureRoomId();
@@ -191,6 +222,7 @@ io.on('connection', (socket) => {
         });
       }
 
+      broadcastRoomsList();
       console.log(`[Disc 2.0] Sala criada: "${roomName}" (ID: ${roomId}) pelo host ${username}`);
     } catch (err) {
       console.error('Erro ao criar sala:', err);
@@ -204,14 +236,38 @@ io.on('connection', (socket) => {
   socket.on('join-room', async (data, callback) => {
     if (!checkSocketRateLimit()) return;
     try {
-      const roomId = String(data.roomId || '').trim();
+      // Extrair ID limpando qualquer formato de URL ou parâmetros (?room=...)
+      let rawInput = String(data.roomId || '').trim();
+      let roomId = rawInput;
+      const paramMatch = rawInput.match(/[?&]room=([a-zA-Z0-9_-]+)/i);
+      if (paramMatch) {
+        roomId = paramMatch[1].trim();
+      } else {
+        const pathMatch = rawInput.match(/\/([a-zA-Z0-9_-]{6,32})(?:\/|\?|$)/);
+        if (pathMatch) {
+          roomId = pathMatch[1].trim();
+        }
+      }
+
+      // Busca por ID exato ou case-insensitive
+      let room = rooms.get(roomId);
+      if (!room) {
+        const lowerId = roomId.toLowerCase();
+        for (const [id, r] of rooms.entries()) {
+          if (id.toLowerCase() === lowerId) {
+            room = r;
+            roomId = id;
+            break;
+          }
+        }
+      }
+
+      if (!room) {
+        return callback && callback({ success: false, error: 'Sala não encontrada. Verifique o link ou código digitado.' });
+      }
+
       const password = data.password ? String(data.password).trim() : '';
       const username = sanitizeText(data.username || 'Amigo');
-
-      const room = rooms.get(roomId);
-      if (!room) {
-        return callback && callback({ success: false, error: 'Sala não encontrada. Verifique o código.' });
-      }
 
       // Checa se o IP foi banido
       if (room.bannedIps.has(clientIp)) {
@@ -270,6 +326,8 @@ io.on('connection', (socket) => {
     targetSocket.join(room.id);
     targetSocket.currentRoomId = room.id;
     targetSocket.pendingRoomId = null;
+
+    broadcastRoomsList();
 
     // Constrói lista de membros existentes para o novo membro
     const existingMembers = [];
@@ -459,10 +517,12 @@ io.on('connection', (socket) => {
         setTimeout(() => {
           if (rooms.has(roomId) && rooms.get(roomId).members.size === 0) {
             rooms.delete(roomId);
+            broadcastRoomsList();
             console.log(`[Disc 2.0] Sala vazia ${roomId} removida da memória.`);
           }
         }, 120000);
       }
+      broadcastRoomsList();
     }
 
     // Se estava em fila de espera
