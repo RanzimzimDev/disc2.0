@@ -10,15 +10,13 @@ Ele foi desenhado para ser usado em conjunto com o Discord tradicional:
 
 ## 🚀 Como Iniciar em 1 Clique
 
-### 1. Iniciar no seu Computador
-- Dê dois cliques em **`iniciar.bat`**.
-- O navegador abrirá automaticamente em `http://localhost:3000`.
+### Opção 1: Baixar o Aplicativo Oficial (.exe para Windows)
+- 👉 **[Clique aqui para baixar o Disc 2.0 (.exe)](https://github.com/RanzimzimDev/disc2.0/releases/latest/download/Disc2.exe)**
+- Dê dois cliques no arquivo baixado: ele abre direto em tela cheia, já conectado na nuvem para transmitir e assistir a 60 FPS com áudio do jogo!
 
-### 2. Compartilhar com seus Amigos (100% Gratuito)
-- Dê dois cliques em **`compartilhar_com_amigos.bat`** (mantenha o `iniciar.bat` rodando).
-- O terminal gerará um link seguro `https://...loca.lt`.
-- Copie e mande para seus amigos no Discord ou WhatsApp.
-- **Seus amigos só precisam clicar e assistir**: sem instalar nada, direto pelo navegador (Chrome, Edge, Opera, celular, etc.).
+### Opção 2: Acessar pelo Navegador
+- Abra o link oficial na nuvem: **[https://disc2-0.onrender.com](https://disc2-0.onrender.com)**
+- Funciona no Chrome, Edge, Brave, Opera, Firefox e celular sem precisar instalar nada!
 
 ---
 
