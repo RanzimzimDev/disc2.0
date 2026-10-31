@@ -1,0 +1,7 @@
+node_modules/
+package-lock.json
+*.log
+.env
+.DS_Store
+iniciar.bat
+compartilhar_com_amigos.bat
