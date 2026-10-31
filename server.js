@@ -92,6 +92,9 @@ function sanitizeText(str) {
 // ==========================================
 // ROTAS DE API
 // ==========================================
+// Health check endpoint para o Render
+app.get('/healthz', (req, res) => res.status(200).send('OK'));
+
 app.get('/api/check-room/:roomId', (req, res) => {
   const { roomId } = req.params;
   const room = rooms.get(roomId);
