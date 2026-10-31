@@ -1,0 +1,26 @@
+{
+  "name": "disc2.0",
+  "version": "1.0.0",
+  "description": "Discord 2.0 - Plataforma privada de compartilhamento de tela a 60 FPS e voz segura",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "discord",
+    "webrtc",
+    "screen-sharing",
+    "voice-chat",
+    "p2p"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.2.0",
+    "helmet": "^7.1.0",
+    "socket.io": "^4.7.5"
+  }
+}
