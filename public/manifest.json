@@ -1,0 +1,17 @@
+{
+  "name": "Disc 2.0 — Transmissão de Tela 60 FPS",
+  "short_name": "Disc 2.0",
+  "description": "Compartilhamento de tela em 60 FPS e áudio de jogos para amigos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0c0e",
+  "theme_color": "#1e1f22",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
