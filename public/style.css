@@ -501,6 +501,64 @@ input {
   background-color: black;
 }
 
+/* Indicador de carregamento no card de vídeo */
+.stream-loading-indicator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background-color: #0b0c0d;
+  color: var(--text-muted);
+  font-size: 13px;
+  z-index: 5;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.stream-spinner {
+  width: 38px;
+  height: 38px;
+  border: 3px solid rgba(168, 85, 247, 0.2);
+  border-top-color: #a855f7;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Botão flutuante para desmutar áudio caso bloqueado pelo navegador */
+.audio-unlock-hint {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  animation: slideDownAlert 0.3s ease;
+}
+
+.btn-unlock-sound {
+  background: rgba(15, 10, 25, 0.9);
+  backdrop-filter: blur(8px);
+  border: 1px solid #a855f7;
+  color: #fff;
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6), 0 0 12px rgba(168, 85, 247, 0.4);
+  transition: all 0.2s ease;
+}
+
+.btn-unlock-sound:hover {
+  background: #a855f7;
+  transform: scale(1.05);
+}
+
 /* Overlay Superior e Inferior do Player */
 .stream-overlay {
   position: absolute;

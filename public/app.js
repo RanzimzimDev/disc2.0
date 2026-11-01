@@ -472,6 +472,12 @@ async function startScreenSharing() {
     state.localScreenStream = stream;
     state.isStreaming = true;
 
+    // Configura contentHint 'motion' para priorizar 60 FPS e detalhe máximo
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack && 'contentHint' in videoTrack) {
+      videoTrack.contentHint = 'motion';
+    }
+
     // Registra a tela local no mapa de transmissões ativas
     state.activeStreams.set(state.socket.id, {
       stream,
@@ -628,18 +634,67 @@ function createStreamCard(data, socketId) {
   card.className = 'stream-card';
   card.id = `stream-card-${socketId}`;
 
+  // Indicador de carregamento suave
+  const loadingIndicator = document.createElement('div');
+  loadingIndicator.className = 'stream-loading-indicator';
+  loadingIndicator.innerHTML = `
+    <div class="stream-spinner"></div>
+    <span>Conectando transmissão 60 FPS...</span>
+  `;
+  card.appendChild(loadingIndicator);
+
   const video = document.createElement('video');
   video.srcObject = data.stream;
   video.autoplay = true;
   video.playsInline = true;
+  video.setAttribute('playsinline', 'true');
+  video.setAttribute('webkit-playsinline', 'true');
+  video.setAttribute('autoplay', 'true');
 
-  if (data.isLocal) {
-    video.muted = true;
-  } else {
-    video.muted = !!data.isMuted;
-    video.volume = data.volume !== undefined ? data.volume : 1;
-    video.play().catch((e) => console.log('Autoplay erro:', e));
-  }
+  // Remove o carregamento assim que o primeiro frame renderizar
+  const handlePlaying = () => {
+    loadingIndicator.style.opacity = '0';
+    setTimeout(() => {
+      if (loadingIndicator.parentNode) loadingIndicator.remove();
+    }, 250);
+  };
+
+  video.addEventListener('playing', handlePlaying);
+  video.addEventListener('loadeddata', handlePlaying);
+
+  // Inicialização segura de reprodução (Evita tela preta por restrição de autoplay)
+  const attemptPlay = async () => {
+    if (data.isLocal) {
+      video.muted = true;
+      try {
+        await video.play();
+      } catch (e) {
+        console.warn('Erro ao reproduzir stream local:', e);
+      }
+      return;
+    }
+
+    try {
+      // 1. Tenta reproduzir com áudio normalmente
+      video.muted = !!data.isMuted;
+      video.volume = data.volume !== undefined ? data.volume : 1;
+      await video.play();
+    } catch (err) {
+      console.warn('[Limbo Tela] Autoplay com áudio bloqueado pela política do navegador. Iniciando com vídeo mudo...', err);
+      // 2. Se o navegador bloqueou o áudio, forçamos mudo temporário para a imagem APARECER IMEDIATAMENTE (nunca fica preto!)
+      try {
+        video.muted = true;
+        await video.play();
+        showAudioUnlockOverlay(card, video, data);
+      } catch (err2) {
+        console.error('[Limbo Tela] Falha crítica ao iniciar vídeo:', err2);
+      }
+    }
+  };
+
+  video.addEventListener('loadedmetadata', attemptPlay);
+  video.addEventListener('canplay', attemptPlay);
+  attemptPlay();
 
   card.appendChild(video);
 
@@ -728,6 +783,43 @@ function createStreamCard(data, socketId) {
   return card;
 }
 
+function showAudioUnlockOverlay(card, video, data) {
+  if (card.querySelector('.audio-unlock-hint')) return;
+  const hint = document.createElement('div');
+  hint.className = 'audio-unlock-hint';
+  hint.innerHTML = `
+    <button class="btn-unlock-sound" title="Clique para ativar o áudio do jogo">
+      <span>🔊 Clique para ativar som</span>
+    </button>
+  `;
+  const btn = hint.querySelector('.btn-unlock-sound');
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    video.muted = false;
+    video.volume = data.volume !== undefined ? data.volume : 1;
+    data.isMuted = false;
+    hint.remove();
+  });
+  card.appendChild(hint);
+}
+
+// Ativar áudio automaticamente ao primeiro clique do usuário em qualquer lugar da tela
+window.addEventListener('click', () => {
+  document.querySelectorAll('.stream-card video').forEach((v) => {
+    if (v.muted) {
+      const card = v.closest('.stream-card');
+      const socketId = card ? card.id.replace('stream-card-', '') : null;
+      const streamData = socketId ? state.activeStreams.get(socketId) : null;
+      if (streamData && !streamData.isLocal && !streamData.isMuted) {
+        v.muted = false;
+        v.volume = streamData.volume !== undefined ? streamData.volume : 1;
+        const hint = card ? card.querySelector('.audio-unlock-hint') : null;
+        if (hint) hint.remove();
+      }
+    }
+  });
+});
+
 // ==========================================
 // WEBRTC P2P BIDIRECIONAL
 // ==========================================
@@ -755,7 +847,11 @@ function createPeerConnection(targetSocketId, isInitiator) {
 
   // Quando receber tela de um amigo
   pc.ontrack = (event) => {
-    const remoteStream = event.streams[0];
+    let remoteStream = event.streams && event.streams[0];
+    if (!remoteStream) {
+      remoteStream = new MediaStream([event.track]);
+    }
+
     const member = state.members.get(targetSocketId);
     const username = member ? member.username : 'Amigo';
 
@@ -782,13 +878,80 @@ function createPeerConnection(targetSocketId, isInitiator) {
   return pc;
 }
 
+// Injeção de bitrate no SDP para transmissões em 4K e 1080p a 60 FPS
+function boostSdpBitrate(sdp, quality) {
+  let bitrateKbps = 14000; // 14 Mbps padrão para 1080p60
+  if (quality === '4k60') bitrateKbps = 32000; // 32 Mbps para 4K Ultra HD cristalino!
+  else if (quality === '720p60') bitrateKbps = 6000;
+
+  let modified = sdp;
+  if (modified.indexOf('b=AS:') >= 0) {
+    modified = modified.replace(/b=AS:\d+/g, `b=AS:${bitrateKbps}`);
+  } else {
+    modified = modified.replace(/m=video ([^\r\n]+)\r\n/g, `m=video $1\r\nb=AS:${bitrateKbps}\r\nb=TIAS:${bitrateKbps * 1000}\r\n`);
+  }
+
+  modified = modified.replace(
+    /(a=fmtp:\d+ [^\r\n]+)/g,
+    `$1;x-google-max-bitrate=${bitrateKbps};x-google-min-bitrate=6000;x-google-start-bitrate=${Math.floor(bitrateKbps / 2)}`
+  );
+
+  return modified;
+}
+
+function applyHighBitrateSettings(pc) {
+  try {
+    if (pc.setCodecPreferences && RTCRtpSender.getCapabilities) {
+      const caps = RTCRtpSender.getCapabilities('video');
+      if (caps && caps.codecs) {
+        const h264 = caps.codecs.filter(c => c.mimeType.toLowerCase() === 'video/h264');
+        const others = caps.codecs.filter(c => c.mimeType.toLowerCase() !== 'video/h264');
+        if (h264.length > 0) {
+          pc.getTransceivers().forEach(t => {
+            if (t.sender && t.sender.track && t.sender.track.kind === 'video') {
+              t.setCodecPreferences([...h264, ...others]);
+            }
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Codec preferences:', e);
+  }
+
+  try {
+    let targetBitrate = 14000000;
+    if (state.selectedQuality === '4k60') targetBitrate = 32000000;
+    else if (state.selectedQuality === '720p60') targetBitrate = 6000000;
+
+    pc.getSenders().forEach((sender) => {
+      if (sender.track && sender.track.kind === 'video') {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].maxBitrate = targetBitrate;
+        params.encodings[0].maxFramerate = 60;
+        params.encodings[0].networkPriority = 'high';
+        params.encodings[0].priority = 'high';
+        sender.setParameters(params).catch(() => {});
+      }
+    });
+  } catch (e) {
+    console.warn('SetParameters bitrate:', e);
+  }
+}
+
 async function createAndSendOffer(pc, targetSocketId) {
   try {
+    applyHighBitrateSettings(pc);
     const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+    const boostedSdp = boostSdpBitrate(offer.sdp, state.selectedQuality);
+    const boostedOffer = new RTCSessionDescription({ type: offer.type, sdp: boostedSdp });
+    await pc.setLocalDescription(boostedOffer);
     state.socket.emit('webrtc-offer', {
       targetSocketId,
-      offer
+      offer: boostedOffer
     });
   } catch (err) {
     console.error('Erro na oferta:', err);
@@ -799,11 +962,14 @@ async function handleWebRTCOffer({ senderSocketId, offer }) {
   const pc = createPeerConnection(senderSocketId, false);
   try {
     await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    applyHighBitrateSettings(pc);
     const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    const boostedSdp = boostSdpBitrate(answer.sdp, state.selectedQuality);
+    const boostedAnswer = new RTCSessionDescription({ type: answer.type, sdp: boostedSdp });
+    await pc.setLocalDescription(boostedAnswer);
     state.socket.emit('webrtc-answer', {
       targetSocketId: senderSocketId,
-      answer
+      answer: boostedAnswer
     });
   } catch (err) {
     console.error('Erro ao processar oferta:', err);
